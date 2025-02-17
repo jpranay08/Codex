@@ -4,6 +4,19 @@ const AUTH_HEADERS = API_KEY ? {
     "Authorization": `Bearer ${API_KEY}`
 } : {};
 
+let OPENROUTER_API_KEY= localStorage.getItem('OPENROUTER_API_KEY') || '';
+function setOpenRouterApiKey(key){
+    OPENROUTER_API_KEY=key;
+    localStorage.setItem('OPENROUTER_API_KEY',key);
+}
+
+let SELECTED_MODEL = localStorage.getItem('SELECTED_MODEL') || 'meta-llama/llama-3.2-3b-instruct:free';
+
+function setSelectedModel(model){
+    SELECTED_MODEL=model;
+    localStorage.setItem("SELECTED_MODEL",model)
+}
+
 const CE = "CE";
 const EXTRA_CE = "EXTRA_CE";
 
@@ -53,36 +66,50 @@ var layoutConfig = {
     content: [{
         type: "row",
         content: [{
-            type: "component",
-            width: 66,
-            componentName: "source",
-            id: "source",
-            title: "Source Code",
-            isClosable: false,
-            componentState: {
-                readOnly: false
-            }
-        }, {
-            type: "column",
+            type:"row",
+            width: 80,
             content: [{
                 type: "component",
-                componentName: "stdin",
-                id: "stdin",
-                title: "Input",
+                width: 66,
+                componentName: "source",
+                id: "source",
+                title: "Source Code",
                 isClosable: false,
                 componentState: {
                     readOnly: false
                 }
             }, {
-                type: "component",
-                componentName: "stdout",
-                id: "stdout",
-                title: "Output",
-                isClosable: false,
-                componentState: {
-                    readOnly: true
-                }
+                type: "column",
+                content: [{
+                    type: "component",
+                    componentName: "stdin",
+                    id: "stdin",
+                    title: "Input",
+                    isClosable: false,
+                    componentState: {
+                        readOnly: false
+                    }
+                }, {
+                    type: "component",
+                    componentName: "stdout",
+                    id: "stdout",
+                    title: "Output",
+                    isClosable: false,
+                    componentState: {
+                        readOnly: true
+                    }
+                }]
             }]
+        },{
+            type: "component",
+            width:20,
+            componentName: "chat",
+            id: "chat",
+            title: "Code Assistant",
+            isClosable: false,
+            componentState: {
+                readOnly: true
+            }
         }]
     }]
 };
@@ -102,6 +129,7 @@ function decode(bytes) {
         return unescape(escaped);
     }
 }
+
 
 function showError(title, content) {
     $("#judge0-site-modal #title").html(title);
@@ -133,7 +161,7 @@ function handleRunError(jqXHR) {
     })), "*");
 }
 
-function handleResult(data) {
+async function handleResult(data) {
     const tat = Math.round(performance.now() - timeStart);
     console.log(`It took ${tat}ms to get submission result.`);
 
@@ -149,6 +177,11 @@ function handleResult(data) {
 
     stdoutEditor.setValue(output);
 
+    if(status.id === 6){
+        const selectedLanguage =$selectLanguage.find(":selected").text();
+        handleSyntaxError(sourceEditor.getValue(), selectedLanguage, output);
+    }
+
     $runBtn.removeClass("disabled");
 
     window.top.postMessage(JSON.parse(JSON.stringify({
@@ -157,7 +190,184 @@ function handleResult(data) {
         time: data.time,
         memory: data.memory,
         output: output
-    })), "*");
+    })), "*");}
+
+async function handleSyntaxError(sourceCode, language, error){
+    if(!OPENROUTER_API_KEY){
+        showError("API Key Required","Please set your OpenRouter API key in Code Assistant pannel to get AI suggestions for syntax errors")
+        return
+    }
+
+    const errorLineMatch = error.match(/error|Error on line(\d+)/)
+    const errorLine = errorLineMatch ? parseInt(errorLineMatch[1]): null
+
+    if (errorLine) {
+        sourceEditor.deltaDecorations([], [{
+            range: new monaco.Range(errorLine,1, errorLine,1),
+            options:{
+                isWholeLine: true,
+                className:'errorHighlight',
+                glyphMarginClassName:'errorGlyphMargin'
+            }
+        }])
+    }
+    try{
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions',{
+            method: 'POST',
+            headers:{
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+                'HTTP-Referer' : window.location.origin,
+                'X-Title' : 'Judge0 IDE'
+            },
+            body: JSON.stringify({
+                model:SELECTED_MODEL,
+                messages:[{
+                    role:'system',
+                    content: `You are an expert programming assistant, A user has code that produced a syntax error. Analyse the code, the provide a specifix fix. Format your response as a diff in the following format:
+
+                    ERROR_ANALYSIS: <brief explanation of the error>
+
+                    DIFF:
+                    <show only the lines that need to change, with - for removals and + for additions>
+                    EXPLANATION:<brief explanation of the fix>
+                    Keep your response concise and focused on the specific syntax error.`
+
+                },
+                {
+                    role:'user',
+                    content: `Language :${language}\n\n Code:\n ${sourceCode}\n\nError:\n${error}`
+                }]
+            })
+        })
+
+        if (!response.ok){
+            throw new Error(`API request failed: ${response.statusText}` )
+        }
+        
+        const data = await response.json()
+        const suggestion = data.choices[0].message.content 
+        
+        const diffMatch= suggestion.match(/DIFF:\n([\s\S]*?)(?=\n\nEXPLANATION:|$)/)
+        const explanationMatch=suggestion.match(/EXPLANATION:\s*([\s\S]*?)$/)
+
+        if(diffMatch){
+            const formattedDiff= diffMatch[1]
+                                .split('\n')
+                                .map(line=> {
+                                    if(line.startsWith('+')){
+                                        return `<span class="text-[#51cf66]"> ${line}</span>`
+                                    } else if (line.startsWith('-')){
+                                        return `<span class="text-[#ff6b6b]">${line}</span>`
+                                    }
+                                    return `<span class="text-[#8a8a8a]">${line}</span>`
+                                })
+                                .join('\n')
+            const diffContainer=document.createElement('div')
+            diffContainer.className='diff-suggestion bg-[#1e1e1e] p-4 rounded-lg border border-[#3e3e42] fixed bottom-4 right-4 w-96 shadow-lg'
+            diffContainer.innerHTML=   `
+            <div class="diff-header flex justify-between items-center mb-2">
+            <h3 class="text-[#cccccc] font-semibold"> Suggested Fix</h3.
+            <div class="flex gap-2">
+                                <button class="accept-diff bg-[#0078d4] hover:bg-[#006bb3] text-white px-3 py-1 rounded"> Accept</button>
+                                <button class="reject-diff bg-[#3e3e42] hover:bg-[#4e4e52] text-white px-3 py-1 rounded"> Reject</button>
+                                </div>
+                                </div>
+                                <pre class="diff-content text-sm font-mono text-[#cccccc] overflow-x-auto whitespace-pre">${formattedDiff}</pre>
+                                ${explanationMatch ? `<p class="mt-2 text-sm text-[#8a8a8a]">${explanationMatch[1]}</p>`:''}
+            `
+            const existingDiff= document.querySelector('.diff-suggestion')
+            if(existingDiff){
+                existingDiff.remove()
+            }
+            document.body.appendChild(diffContainer)
+            diffContainer.querySelector('.accept-diff').addEventListener(
+                'click',() => {
+                    const diff =diffMatch[1]
+                    console.log('Raw diff:', diff)
+                    const lines= diff.split('\n').map(line=> line.trimEnd())
+                    .filter(line=> line.length >0)
+                    console.log('Parsed Lines:', lines)
+                    let currentCode =sourceEditor.getValue().split('\n')
+                    console.log('Current code lines:', currentCode)
+
+
+                    let changes=[]
+
+                    let currentChange ={ removals:[], additions:[]}
+
+                    lines.forEach(line => {
+                        if (line.startsWith('-')){
+                            currentChange.removals.push(line.substring(1))
+                        } else if(line.startsWith('+')){
+                            currentChange.additions.push(line.substring(1))
+                        } else {
+                            if(currentChange.removals.length >0 || currentChange.additions.length >0){
+                                changes.push(currentChange)
+                                currentChange={removals:[], additions:[]}
+                            }
+                        }
+
+                    })
+                    if(currentChange.removals.length >0 || currentChange.additions.length >0){
+                        changes.push(currentChange)
+                    }
+
+                    console.log('Grouped changes:', changes)
+
+                    changes.forEach(change => {
+                        let targetLine= -1
+                        if(change.removals.length >0 ){
+                            const lineToFind =change.removals[0]
+                            targetLine =currentCode.findIndex(
+                                codeLine => codeLine.trim() === lineToFind.trim()
+                            )
+                        }
+
+                        if(targetLine ===-1 && errorLine){
+                            targetLine=errorLine-1
+                        }
+
+                        if(targetLine === -1){
+                            const contextLines= lines.filter(line => !line.startsWith('+') && !line.startsWith('-'))
+                            for (const contextLine of contextLines){
+                                targetLine = currentCode.findIndex(
+                                    codeline => codeLine.trim() ===contextLine.trim()
+
+                                )
+                                if (targetLine !== -1) break
+                            }
+                        }
+                        if(targetLine !== -1){
+                            console.log("Applying change at Line:",targetLine)
+                            console.log("Removing Lines:", change.removals)
+                            console.log("Adding Lines:", change.additions)
+                            if(change.removals.length>0){
+                                currentCode.splice(targetLine, change.removals.length)
+                            }
+                            if(change.additions.length>0){
+                                currentCode.splice(targetLine,0, ...change.additions)
+                            }
+                        }else {
+                            console.log('Could not find target line for change')
+                        }
+                    })
+
+                    const newContent =currentCode.join('\n')
+                    console.log("new content:", newContent)
+
+                    sourceEditor.setValue(newContent)
+                    diffContainer.remove()
+
+                })
+                diffContainer.querySelector('.reject-diff').addEventListener('click',() => {diffContainer.remove()
+
+                })
+        }
+    } catch(error) {
+        console.error("error getting sugestion:", error)
+        showError ("error", "Failed to get code suggestion. Please set your open router key and try again...")
+    }
 }
 
 async function getSelectedLanguage() {
@@ -537,6 +747,7 @@ $(document).ready(async function () {
     });
 
     require(["vs/editor/editor.main"], function (ignorable) {
+        
         layout = new GoldenLayout(layoutConfig, $("#judge0-site-content"));
 
         layout.registerComponent("source", function (container, state) {
@@ -579,6 +790,269 @@ $(document).ready(async function () {
                 }
             });
         });
+
+
+        function markdownToHtml(markdownText) {
+            // Convert headers (#, ##, ###, etc.)
+            markdownText = markdownText.replace(/^###### (.*$)/gim, '<h6>$1</h6>');
+            markdownText = markdownText.replace(/^##### (.*$)/gim, '<h5>$1</h5>');
+            markdownText = markdownText.replace(/^#### (.*$)/gim, '<h4>$1</h4>');
+            markdownText = markdownText.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+            markdownText = markdownText.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+            markdownText = markdownText.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+        
+            // Convert bold (** or __)
+            markdownText = markdownText.replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>');
+            markdownText = markdownText.replace(/__(.*?)__/gim, '<strong>$1</strong>');
+        
+            // Convert italics (* or _)
+            markdownText = markdownText.replace(/\*(.*?)\*/gim, '<em>$1</em>');
+            markdownText = markdownText.replace(/_(.*?)_/gim, '<em>$1</em>');
+        
+            // Convert unordered lists (-, *, +)
+            markdownText = markdownText.replace(/^\s*[-*+] (.*$)/gim, '<li>$1</li>');
+            markdownText = markdownText.replace(/<li>(.*)<\/li>/gim, '<ul><li>$1</li></ul>');
+        
+            // Convert links ([text](url))
+            markdownText = markdownText.replace(/\[(.*?)\]\((.*?)\)/gim, '<a href="$2">$1</a>');
+        
+            // Convert paragraphs (any text not wrapped in other tags)
+            markdownText = markdownText.replace(/^(?!<[hlu])(.*?)$/gim, '<p>$1</p>');
+        
+            // Remove extra <ul> tags around single <li> elements
+            markdownText = markdownText.replace(/<ul>(<li>.*<\/li>)<\/ul>/gim, '$1');
+        
+            return markdownText;
+        }
+        
+
+        layout.registerComponent("chat", function (container, state){
+            const chatContainer =document.createElement("div");
+            chatContainer.className="chat-container h-pull flex flex-col bg-[#1e1e1e]";
+            chatContainer.innerHTML=`
+            <div class= "chat-header bg-[#252526] border-b border-[#3e3e42] p-4">
+                <div class="chat-header-content space-y-1">
+                    <h3 class="chat-title text-lg font-semibold text-[#cccccc] flex items-center gap-2">
+                        <svg class="w-5 h-5 text-[#0078d4]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+                        </svg>
+                            Code Assistant
+                        </h3>
+                        <div class="flex items-center gap-2">
+                        <input type="password"
+                                id="openrouter-api-key"
+                                class="flex-1 bg-[#1e1e1e] text-[#cccccc] text-sm rounded border border-[#3e3e42] px-2 py-1 focus:outline-none focus:border-[#0078d4]"
+                                placeholder="Enter OpenRouter API Key"
+                                value="${OPENROUTER_API_KEY}"
+                                />
+                                <button 
+                                    id="save-api-key"
+                                    class="bg-[#0078d4] hover:bg-[#006bb3] text-white text-sm px-2 py-1 rounded transition-colors"
+                                    > Save Key
+                                    </button>
+                                </div>
+                        <div class="flex items-center gap-2">
+                        <input type="input"
+                                id="openrouter-model-name"
+                                class="flex-1 bg-[#1e1e1e] text-[#cccccc] text-sm rounded border border-[#3e3e42] px-2 py-1 focus:outline-none focus:border-[#0078d4]"
+                                placeholder="Provide your model name here..."
+                                value="${SELECTED_MODEL}"
+                                />
+                                <button 
+                                    id="save-model"
+                                    class="bg-[#0078d4] hover:bg-[#006bb3] text-white text-sm px-2 py-1 rounded transition-colors"
+                                    > Save model
+                                    </button>
+                                </div>
+                            <p class ="chat-description text-sm text-[#8a8a8a]"> Do you have any question or need help with programming, Let me help you</p>
+                    </div>
+                </div>
+                <div class="messages flex-1 overflow-y-auto p-4 space-y-4"></div>
+                <div class="chat-input-container border-t border-[#3e3e42] p-4 bg-[#252526]">
+                    <div class="chat-input-wrapper flex gap-2">
+                        <textarea 
+                            class="chat-input flex-1 bg-[#1e1e1e] text-[#cccccc] rounded-lg border border-[#3e3e42] p-3 focus:outline-none focus:border-[#0078d4] resize-none"
+                            rows="1"
+                            placeholder="Ask about the code..."></textarea>
+
+                        <button class="send-btn bg-[#0078d4] hover:bg-[#006bb3] text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors" title="Send message (Enter)">
+                            <span>Send</span>
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 1919 2-9-18-9 18 9-2zm0 0v-8"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            `
+            const messageEl=chatContainer.querySelector(".messages")
+            const inputEl= chatContainer.querySelector("textarea")
+            const sendBtn = chatContainer.querySelector(".send-btn")
+            
+
+            inputEl.addEventListener('input', function(){
+                this.style.height='auto'
+                this.style.height=Math.min(this.scrollHeight, 200)+'px'
+            })
+
+            function formatTimestamp(){
+                const now= new Date()
+                return now.toLocaleTimeString('en-US',{
+                    hour:'numeric',
+                    minutes:'2-digit',
+                    hour12: true
+                })
+
+            }
+            function addUserMessage(message){
+                const messageHTML=`
+                    <div class="message-wrapper user-message-wrapper flex justify-end">
+                        <div class="message user-message bg-[#0078d4] text-[#ffffff] rounded-2xl rounded-tr-sm px-4 max-w-[80%]">
+                            <div class="message-content">${markdownToHtml(message)}</div>
+                            <div class="message-timestamp text-xs text-[#e6e6e6] mt-1">${formatTimestamp()}</div>
+                        </div>
+                    </div>      
+                `
+                messageEl.insertAdjacentHTML('beforeend',messageHTML)
+                messageEl.scrollTop=messageEl.scrollHeight
+            }
+
+            function addAssistantMessage(message){
+                const messageHTML=`
+                    <div class="message-wrapper assistant-message-wrapper flex justify-start">
+                        <div class="message assistant-message bg-[#252526] text-[#cccccc] rounded-2xl rounded-tl-sm px-4 py-2 max-w-[80%]">
+                            <div class="message-content">${markdownToHtml(message)}</div>
+                            <div class="message-timestamp text-xs text-[#8a8a8a] mt-1">${formatTimestamp()}</div>
+                        </div>
+                    </div>      
+                `
+                messageEl.insertAdjacentHTML('beforeend',messageHTML)
+                messageEl.scrollTop=messageEl.scrollHeight
+            }
+
+            function addTypingIndicator(){
+                const indicatorHTML=`
+                    <div class="message-wrapper assistant-message-wrapper flex justify-start" id="typing-indicator">
+                        <div class="message assistant-message bg-[#252526] text-[#cccccc] rounded-2xl rounded-tl-sm px-4 py-2">
+                            <div class="typing-indicator flex gap-1">
+                                <div class="typing-dot w-2 h-2 bg-[#8a8a8a] rounded-full animate-bounce"></div>
+                                <div class="typing-dot w-2 h-2 bg-[#8a8a8a] rounded-full animate-bounce" style="animation-delay:0.2s"></div>
+                                <div class="typing-dot w-2 h-2 bg-[#8a8a8a] rounded-full animate-bounce" style="animation-delay:0.4s"></div>
+                            </div>
+                        </div>
+                    </div>      
+                `
+                messageEl.insertAdjacentHTML('beforeend',indicatorHTML)
+                messageEl.scrollTop=messageEl.scrollHeight
+            }
+            function removeTypingIndicator(){
+                const indicator= messageEl.querySelector('#typing-indicator')
+                if(indicator){
+                    indicator.remove()
+                }
+            }
+
+            async function sendMessage(){
+                const message = inputEl.value.trim()
+                if(!message) return 
+                inputEl.value=''
+                inputEl.style.height= 'auto'
+                
+                addUserMessage(message)
+                addTypingIndicator()
+                
+                const codeContext={
+                    source_code:sourceEditor.getValue(),
+                    language: $selectLanguage.find(":selected").text(),
+                    stdin: stdinEditor.getValue(),
+                    stdout: stdoutEditor.getValue()
+                }
+
+                try{
+                const response = await fetch('https://openrouter.ai/api/v1/chat/completions',{
+                    method: 'POST',
+                    headers:{
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+                        'HTTP-Referer' : window.location.origin,
+                        'X-Title' : 'Judge0 IDE'
+                    },
+                    body: JSON.stringify({
+                        model:SELECTED_MODEL,
+                        messages:[{
+                            role:'system',
+                            content: `You are an expert programming assistant, You have access to the following code context:
+                            Language:${codeContext.language}
+                            Source Code :
+                            \`\`\`
+                            ${codeContext.source_code}
+                            \`\`\`
+                            ${codeContext.stdin ? `Input: \n${codeContext.stdin}\n` : ''}
+                            ${codeContext.stdout ? `Output: \n${codeContext.stdout}\n` : ''}
+
+                            Provide clear, concise, and accurate responses about the code. If suggesting code changes, explain the reasoning and ensure they follow best practices.`
+
+                        },
+                        {
+                            role:'user',
+                            content: `Here is the user's message: 
+                            
+                            <user_message>
+                            ${message}
+                            </user_message>
+
+                            Provide a detailed and accurate response to the user's message based on the code context. If suggesting code changes, explain the reasoning and ensure they follow best practices.`
+                        }]
+                    })
+                })
+
+                if (!response.ok){
+                    throw new Error(`API request failed: ${response.statusText}` )
+                }
+                
+                const data = await response.json()
+                const assistantMessage= data.choices[0].message.content 
+                removeTypingIndicator()
+                addAssistantMessage(assistantMessage)
+            
+        }
+        catch (error){
+            console.error('Error:', error)
+            removeTypingIndicator()
+            addAssistantMessage("Sorry, there was an error processing your request. Please make sure you have set up your Open Router API key correctly.")
+        }
+    }
+            sendBtn.addEventListener("click",sendMessage)
+            inputEl.addEventListener("keydown", (e) => {
+                if( e.key=== "Enter" && !e.shiftKey){
+                    e.preventDefault()
+                    sendMessage()
+                }
+            })
+
+
+            const apiKeyInput = chatContainer.querySelector("#openrouter-api-key")
+            const saveKeyBtn= chatContainer.querySelector("#save-api-key")
+
+            saveKeyBtn.addEventListener("click",() => {
+                const newKey=apiKeyInput.value.trim()
+                console.log("saved key")
+                setOpenRouterApiKey(newKey)
+                addAssistantMessage("API key has been saved.")
+            })
+
+
+            const modelInput = chatContainer.querySelector("#openrouter-model-name")
+            const saveModelBtn= chatContainer.querySelector("#save-model")
+
+            saveModelBtn.addEventListener("click",() => {
+                const newModel=modelInput.value.trim()
+                console.log("saved model")
+                setSelectedModel(newModel)
+                addAssistantMessage("Model "+newModel+"has been saved.")
+            })
+            container.getElement().append(chatContainer)
+        
+        } );
 
         layout.on("initialised", function () {
             setDefaults();
