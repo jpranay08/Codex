@@ -264,17 +264,19 @@ async function handleSyntaxError(sourceCode, language, error){
                                 })
                                 .join('\n')
             const diffContainer=document.createElement('div')
-            diffContainer.className='diff-suggestion bg-[#1e1e1e] p-4 rounded-lg border border-[#3e3e42] fixed bottom-4 right-4 w-96 shadow-lg'
-            diffContainer.innerHTML=   `
-            <div class="diff-header flex justify-between items-center mb-2">
-            <h3 class="text-[#cccccc] font-semibold"> Suggested Fix</h3.
-            <div class="flex gap-2">
-                                <button class="accept-diff bg-[#0078d4] hover:bg-[#006bb3] text-white px-3 py-1 rounded"> Accept</button>
-                                <button class="reject-diff bg-[#3e3e42] hover:bg-[#4e4e52] text-white px-3 py-1 rounded"> Reject</button>
-                                </div>
-                                </div>
-                                <pre class="diff-content text-sm font-mono text-[#cccccc] overflow-x-auto whitespace-pre">${formattedDiff}</pre>
-                                ${explanationMatch ? `<p class="mt-2 text-sm text-[#8a8a8a]">${explanationMatch[1]}</p>`:''}
+            diffContainer.className = 'diff-suggestion bg-[#1e1e1e] p-4 rounded-lg border border-[#3e3e42] fixed bottom-4 right-4 w-96 shadow-lg flex flex-col max-h-[400px]';
+            diffContainer.innerHTML = `
+                <div class="diff-header flex justify-between items-center mb-2 sticky top-0 bg-[#1e1e1e] p-2 border-b border-[#3e3e42] z-10">
+                    <h3 class="text-[#cccccc] font-semibold"> Suggested Fix</h3>
+                    <div class="flex gap-2">
+                        <button class="accept-diff bg-[#0078d4] hover:bg-[#006bb3] text-white px-3 py-1 rounded">Accept</button>
+                        <button class="reject-diff bg-[#3e3e42] hover:bg-[#4e4e52] text-white px-3 py-1 rounded">Reject</button>
+                    </div>
+                </div>
+                <div class="diff-content text-sm font-mono text-[#cccccc] overflow-y-auto whitespace-pre p-2 flex-1">
+                    ${formattedDiff}
+                </div>
+                ${explanationMatch ? `<p class="mt-2 text-sm text-[#8a8a8a]">${explanationMatch[1]}</p>` : ''}
             `
             const existingDiff= document.querySelector('.diff-suggestion')
             if(existingDiff){
@@ -332,7 +334,7 @@ async function handleSyntaxError(sourceCode, language, error){
                             const contextLines= lines.filter(line => !line.startsWith('+') && !line.startsWith('-'))
                             for (const contextLine of contextLines){
                                 targetLine = currentCode.findIndex(
-                                    codeline => codeLine.trim() ===contextLine.trim()
+                                    codeLine => codeLine.trim() ===contextLine.trim()
 
                                 )
                                 if (targetLine !== -1) break
@@ -828,62 +830,66 @@ $(document).ready(async function () {
 
         layout.registerComponent("chat", function (container, state){
             const chatContainer =document.createElement("div");
-            chatContainer.className="chat-container h-pull flex flex-col bg-[#1e1e1e]";
+            chatContainer.className="chat-container h-full flex flex-col bg-[#1e1e1e]";
             chatContainer.innerHTML=`
-            <div class= "chat-header bg-[#252526] border-b border-[#3e3e42] p-4">
-                <div class="chat-header-content space-y-1">
-                    <h3 class="chat-title text-lg font-semibold text-[#cccccc] flex items-center gap-2">
-                        <svg class="w-5 h-5 text-[#0078d4]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
-                        </svg>
-                            Code Assistant
-                        </h3>
-                        <div class="flex items-center gap-2">
-                        <input type="password"
-                                id="openrouter-api-key"
-                                class="flex-1 bg-[#1e1e1e] text-[#cccccc] text-sm rounded border border-[#3e3e42] px-2 py-1 focus:outline-none focus:border-[#0078d4]"
-                                placeholder="Enter OpenRouter API Key"
-                                value="${OPENROUTER_API_KEY}"
-                                />
-                                <button 
-                                    id="save-api-key"
-                                    class="bg-[#0078d4] hover:bg-[#006bb3] text-white text-sm px-2 py-1 rounded transition-colors"
-                                    > Save Key
-                                    </button>
-                                </div>
-                        <div class="flex items-center gap-2">
-                        <input type="input"
-                                id="openrouter-model-name"
-                                class="flex-1 bg-[#1e1e1e] text-[#cccccc] text-sm rounded border border-[#3e3e42] px-2 py-1 focus:outline-none focus:border-[#0078d4]"
-                                placeholder="Provide your model name here..."
-                                value="${SELECTED_MODEL}"
-                                />
-                                <button 
-                                    id="save-model"
-                                    class="bg-[#0078d4] hover:bg-[#006bb3] text-white text-sm px-2 py-1 rounded transition-colors"
-                                    > Save model
-                                    </button>
-                                </div>
-                            <p class ="chat-description text-sm text-[#8a8a8a]"> Do you have any question or need help with programming, Let me help you</p>
-                    </div>
+        <div class="chat-header bg-[#252526] border-b border-[#3e3e42] p-4">
+            <div class="chat-header-content space-y-1">
+                <h3 class="chat-title text-lg font-semibold text-[#cccccc] flex items-center gap-2">
+                    <svg class="w-5 h-5 text-[#0078d4]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+                    </svg>
+                    Code Assistant
+                </h3>
+                <div class="flex items-center gap-2">
+                    <input type="password"
+                        id="openrouter-api-key"
+                        class="flex-1 bg-[#1e1e1e] text-[#cccccc] text-sm rounded border border-[#3e3e42] px-2 py-1 focus:outline-none focus:border-[#0078d4]"
+                        placeholder="Enter OpenRouter API Key"
+                        value="${OPENROUTER_API_KEY}" />
+                    <button 
+                        id="save-api-key"
+                        class="bg-[#0078d4] hover:bg-[#006bb3] text-white text-sm px-2 py-1 rounded transition-colors">
+                        Save Key
+                    </button>
                 </div>
-                <div class="messages flex-1 overflow-y-auto p-4 space-y-4"></div>
-                <div class="chat-input-container border-t border-[#3e3e42] p-4 bg-[#252526]">
-                    <div class="chat-input-wrapper flex gap-2">
-                        <textarea 
-                            class="chat-input flex-1 bg-[#1e1e1e] text-[#cccccc] rounded-lg border border-[#3e3e42] p-3 focus:outline-none focus:border-[#0078d4] resize-none"
-                            rows="1"
-                            placeholder="Ask about the code..."></textarea>
+                <div class="flex items-center gap-2">
+                    <input type="input"
+                        id="openrouter-model-name"
+                        class="flex-1 bg-[#1e1e1e] text-[#cccccc] text-sm rounded border border-[#3e3e42] px-2 py-1 focus:outline-none focus:border-[#0078d4]"
+                        placeholder="Provide your model name here..."
+                        value="${SELECTED_MODEL}" />
+                    <button 
+                        id="save-model"
+                        class="bg-[#0078d4] hover:bg-[#006bb3] text-white text-sm px-2 py-1 rounded transition-colors">
+                        Save Model
+                    </button>
+                </div>
+                <p class="chat-description text-sm text-[#8a8a8a]">
+                    Do you have any questions or need help with programming? Let me help you.
+                </p>
+            </div>
+        </div>
 
-                        <button class="send-btn bg-[#0078d4] hover:bg-[#006bb3] text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors" title="Send message (Enter)">
-                            <span>Send</span>
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 1919 2-9-18-9 18 9-2zm0 0v-8"/>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-            `
+        <!-- Scrollable messages area -->
+        <div class="messages flex-1 overflow-y-auto p-4 space-y-4"></div>
+
+        <!-- Chat input area stays fixed at the bottom -->
+        <div class="chat-input-container border-t border-[#3e3e42] p-4 bg-[#252526] flex-shrink-0">
+            <div class="chat-input-wrapper flex gap-2">
+                <textarea 
+                    class="chat-input flex-1 bg-[#1e1e1e] text-[#cccccc] rounded-lg border border-[#3e3e42] p-3 focus:outline-none focus:border-[#0078d4] resize-none"
+                    rows="1"
+                    placeholder="Ask about the code..."></textarea>
+
+                <button class="send-btn bg-[#0078d4] hover:bg-[#006bb3] text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors" title="Send message (Enter)">
+                    <span>Send</span>
+                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M22 2L11 13M22 2L15 22L11 13L2 9l20-7z"></path>
+                        </svg>
+                </button>
+            </div>
+        </div>
+    `
             const messageEl=chatContainer.querySelector(".messages")
             const inputEl= chatContainer.querySelector("textarea")
             const sendBtn = chatContainer.querySelector(".send-btn")
